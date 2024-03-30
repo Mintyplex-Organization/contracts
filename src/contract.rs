@@ -1,14 +1,22 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdResult, SubMsg, WasmMsg, Addr};
+use cosmwasm_std::{
+    to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Reply,
+    Response, StdResult, SubMsg, WasmMsg,
+};
 use cw2::set_contract_version;
-use cw721_base::InstantiateMsg as cw721InstantiateMsg;
+use cw721_base::Extension;
+use cw721_non_transferable::{
+    ExecuteMsg as Cw721ExecuteMsg, InstantiateMsg as cw721NonTransferableInstantiateMsg,
+};
 use cw_utils::parse_reply_instantiate_data;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-
-use crate::state::{CollectionParams, Config, CONFIG, COLLECTION_ADDRESS};
+use crate::state::{
+    increment_token_index, CollectionParams, Config, MintParams, COLLECTION_ADDRESS, CONFIG,
+};
+use url::Url;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:contracts";
@@ -49,6 +57,7 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::CreateCollection(params) => execute_create_collection(deps, env, info, params),
+        ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params)
     }
 }
 
@@ -61,10 +70,11 @@ pub fn execute_create_collection(
     let wasm_msg = WasmMsg::Instantiate {
         admin: None,
         code_id: params.code_id,
-        msg: to_json_binary(&cw721InstantiateMsg {
+        msg: to_json_binary(&cw721NonTransferableInstantiateMsg {
+            admin: None,
             name: params.name.clone(),
             symbol: params.symbol,
-            minter: env.contract.address.to_string(),
+            minter: info.sender.to_string(),
         })?,
 
         funds: info.funds,
@@ -74,8 +84,38 @@ pub fn execute_create_collection(
     let submsg = SubMsg::reply_on_success(wasm_msg, INSTANTIATE_CW721_REPLY_ID);
 
     Ok(Response::new()
-        .add_attribute("action", "instantiate")
+        .add_attribute("action", "create collection")
         .add_submessage(submsg))
+}
+
+pub fn execute_mint_nft(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    params: MintParams,
+) -> Result<Response, ContractError> {
+    let collection_address = COLLECTION_ADDRESS.load(deps.storage)?;
+    // check if caller is owner of collection
+
+    Url::parse(&params.token_uri).map_err(|_| ContractError::InvalidTokenURI {})?;
+
+    let mut res = Response::new();
+
+    // Create mint msgs
+    let mint_msg = Cw721ExecuteMsg::<Extension, Empty>::Mint {
+        token_id: increment_token_index(deps.storage)?.to_string(),
+        owner: info.sender.to_string(),
+        token_uri: Some(params.token_uri.clone()),
+        extension: None,
+    };
+    let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: collection_address.to_string(),
+        msg: to_json_binary(&mint_msg)?,
+        funds: vec![],
+    });
+    res = res.add_message(msg);
+
+    Ok(Response::new().add_attribute("action", "mint nft"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -83,7 +123,7 @@ pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
     unimplemented!()
 }
 
-// Reply callback triggered from sg721 contract instantiation in instantiate()
+// Reply callback triggered from cw721 contract instantiation in instantiate()
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
     if msg.id != INSTANTIATE_CW721_REPLY_ID {
@@ -96,11 +136,45 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
             let collection_address = res.contract_address;
             COLLECTION_ADDRESS.save(deps.storage, &Addr::unchecked(collection_address.clone()))?;
             Ok(Response::default()
-                .add_attribute("action", "instantiate_sg721_reply")
-                .add_attribute("sg721_address", collection_address))
+                .add_attribute("action", "instantiate_cw721_reply")
+                .add_attribute("cw721_address", collection_address))
         }
         Err(_) => Err(ContractError::InstantiateCw721Error {}),
     }
 }
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::contract::instantiate;
+    use crate::msg;
+    use crate::state::{CollectionParams, Config, CONFIG};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::Addr;
+    use msg::InstantiateMsg;
+
+    #[test]
+    fn proper_instantiation() {
+        let mut deps = mock_dependencies();
+        let msg = InstantiateMsg { owner: None };
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+
+        let res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg)
+            .expect("instantiation failed");
+        assert_eq!(0, res.messages.len());
+
+        let state = CONFIG.load(&deps.storage).unwrap();
+        assert_eq!(
+            state,
+            Config {
+                owner: Addr::unchecked("creator".to_string())
+            }
+        )
+    }
+
+    // #[test]
+    // fn collection_creation() {
+    //     let mut deps = mock_dependencies();
+    //     let env = mock_env();
+    //     let info = mock_info("creator", &[]);
+    // }
+}
