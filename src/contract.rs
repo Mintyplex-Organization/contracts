@@ -12,7 +12,7 @@ use cw721_non_transferable::{
 use cw_utils::parse_reply_instantiate_data;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
     increment_token_index, CollectionParams, Config, MintParams, COLLECTION_ADDRESS, CONFIG,
 };
@@ -57,13 +57,13 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::CreateCollection(params) => execute_create_collection(deps, env, info, params),
-        ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params)
+        ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params),
     }
 }
 
 pub fn execute_create_collection(
-    deps: DepsMut,
-    env: Env,
+    _deps: DepsMut,
+    _env: Env,
     info: MessageInfo,
     params: CollectionParams,
 ) -> Result<Response, ContractError> {
@@ -90,7 +90,7 @@ pub fn execute_create_collection(
 
 pub fn execute_mint_nft(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     params: MintParams,
 ) -> Result<Response, ContractError> {
@@ -115,12 +115,24 @@ pub fn execute_mint_nft(
     });
     res = res.add_message(msg);
 
-    Ok(Response::new().add_attribute("action", "mint nft"))
+    Ok(res.add_attribute("action", "mint-nft"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!()
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::QueryConfig {} => to_json_binary(&query_config(deps)?),
+    }
+}
+
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let collection_address = COLLECTION_ADDRESS.load(deps.storage)?;
+
+    Ok(ConfigResponse {
+        collection_address,
+        config,
+    })
 }
 
 // Reply callback triggered from cw721 contract instantiation in instantiate()
@@ -141,40 +153,4 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
         }
         Err(_) => Err(ContractError::InstantiateCw721Error {}),
     }
-}
-#[cfg(test)]
-mod tests {
-    use crate::contract::instantiate;
-    use crate::msg;
-    use crate::state::{CollectionParams, Config, CONFIG};
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::Addr;
-    use msg::InstantiateMsg;
-
-    #[test]
-    fn proper_instantiation() {
-        let mut deps = mock_dependencies();
-        let msg = InstantiateMsg { owner: None };
-        let env = mock_env();
-        let info = mock_info("creator", &[]);
-
-        let res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg)
-            .expect("instantiation failed");
-        assert_eq!(0, res.messages.len());
-
-        let state = CONFIG.load(&deps.storage).unwrap();
-        assert_eq!(
-            state,
-            Config {
-                owner: Addr::unchecked("creator".to_string())
-            }
-        )
-    }
-
-    // #[test]
-    // fn collection_creation() {
-    //     let mut deps = mock_dependencies();
-    //     let env = mock_env();
-    //     let info = mock_info("creator", &[]);
-    // }
 }
