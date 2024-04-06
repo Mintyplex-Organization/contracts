@@ -119,8 +119,20 @@ pub fn execute_mint_nft(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!()
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::QueryConfig {} => to_json_binary(&query_config(deps)?),
+    }
+}
+
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let collection_address = COLLECTION_ADDRESS.load(deps.storage)?;
+
+    Ok(ConfigResponse {
+        collection_address,
+        config,
+    })
 }
 
 // Reply callback triggered from cw721 contract instantiation in instantiate()
