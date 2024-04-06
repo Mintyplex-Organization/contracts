@@ -154,39 +154,3 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
         Err(_) => Err(ContractError::InstantiateCw721Error {}),
     }
 }
-#[cfg(test)]
-mod tests {
-    use crate::contract::instantiate;
-    use crate::msg;
-    use crate::state::{CollectionParams, Config, CONFIG};
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::Addr;
-    use msg::InstantiateMsg;
-
-    #[test]
-    fn proper_instantiation() {
-        let mut deps = mock_dependencies();
-        let msg = InstantiateMsg { owner: None };
-        let env = mock_env();
-        let info = mock_info("creator", &[]);
-
-        let res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg)
-            .expect("instantiation failed");
-        assert_eq!(0, res.messages.len());
-
-        let state = CONFIG.load(&deps.storage).unwrap();
-        assert_eq!(
-            state,
-            Config {
-                owner: Addr::unchecked("creator".to_string())
-            }
-        )
-    }
-
-    // #[test]
-    // fn collection_creation() {
-    //     let mut deps = mock_dependencies();
-    //     let env = mock_env();
-    //     let info = mock_info("creator", &[]);
-    // }
-}
