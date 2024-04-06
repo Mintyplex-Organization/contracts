@@ -12,7 +12,7 @@ use cw721_non_transferable::{
 use cw_utils::parse_reply_instantiate_data;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
     increment_token_index, CollectionParams, Config, MintParams, COLLECTION_ADDRESS, CONFIG,
 };
@@ -57,13 +57,13 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::CreateCollection(params) => execute_create_collection(deps, env, info, params),
-        ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params)
+        ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params),
     }
 }
 
 pub fn execute_create_collection(
-    deps: DepsMut,
-    env: Env,
+    _deps: DepsMut,
+    _env: Env,
     info: MessageInfo,
     params: CollectionParams,
 ) -> Result<Response, ContractError> {
@@ -90,7 +90,7 @@ pub fn execute_create_collection(
 
 pub fn execute_mint_nft(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     params: MintParams,
 ) -> Result<Response, ContractError> {
@@ -115,7 +115,7 @@ pub fn execute_mint_nft(
     });
     res = res.add_message(msg);
 
-    Ok(Response::new().add_attribute("action", "mint nft"))
+    Ok(res.add_attribute("action", "mint-nft"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
