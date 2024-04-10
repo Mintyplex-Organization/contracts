@@ -1,6 +1,5 @@
 use crate::state;
-use crate::state::Config;
-use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_schema::cw_serde;
 use cosmwasm_std::Addr;
 use state::{CollectionParams, MintParams};
 
@@ -16,14 +15,14 @@ pub enum ExecuteMsg {
 }
 
 #[cw_serde]
-#[derive(QueryResponses)]
+// #[derive(QueryResponses)]
 pub enum QueryMsg {
-    #[returns(ConfigResponse)]
-    QueryConfig {},
-}
+    // Query for config
+    Config {},
 
-#[cw_serde]
-pub struct ConfigResponse {
-    pub config: Config,
-    pub collection_address: Addr,
+    // Query for the current token index
+    TokenIndex {},
+
+    // Query for collections created by a specific creator
+    CreatorCollections { creator: Addr },
 }
