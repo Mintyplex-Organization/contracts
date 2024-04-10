@@ -2,4 +2,5 @@
 wasm = "build --release --target wasm32-unknown-unknown"
 unit-test = "test --lib"
 schema = "run --example schema"
-integration-test = "test --test integration"
+integration-test = "test --test integration_test"
+contract-test = "test --test contract_test"
