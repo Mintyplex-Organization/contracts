@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Reply,
-    Response, StdResult, SubMsg, WasmMsg,
+    to_json_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo,
+    Reply, Response, StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw721_base::Extension;
@@ -103,14 +103,14 @@ pub fn execute_create_collection(
 
 pub fn execute_mint_nft(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     params: MintParams,
 ) -> Result<Response, ContractError> {
     if info
         .funds
         .iter()
-        .any(|coin| coin.denom == "uxion" && coin.amount.u128() == MINT_FEE)
+        .any(|coin| coin.denom != "uxion" && coin.amount.u128() != MINT_FEE)
     {
         return Err(ContractError::IncorrectFunds {});
     }
@@ -128,8 +128,17 @@ pub fn execute_mint_nft(
         funds: vec![],
     });
 
+    let bank_msg = BankMsg::Send {
+        to_address: env.contract.address.to_string(),
+        amount: vec![Coin {
+            denom: "uxion".to_string(),
+            amount: Uint128::from(MINT_FEE),
+        }],
+    };
+
     Ok(Response::new()
         .add_message(msg)
+        .add_message(bank_msg)
         .add_attribute("action", "mint-nft"))
 }
 
@@ -146,7 +155,6 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 
 fn query_config(deps: Deps) -> StdResult<Config> {
     let config = CONFIG.load(deps.storage)?;
-
     Ok(config)
 }
 

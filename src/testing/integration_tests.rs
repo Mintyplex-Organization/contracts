@@ -2,7 +2,8 @@
 mod tests {
     use crate::testing::helpers::MintyplexContract;
 
-    use crate::msg::InstantiateMsg;
+    use crate::msg::{ExecuteMsg, InstantiateMsg};
+    use crate::state::CollectionParams;
     use cosmwasm_std::{to_json_binary, Addr, Binary, Coin, Empty, Response, StdResult, Uint128};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
     use serde::{Deserialize, Serialize};
@@ -61,8 +62,12 @@ mod tests {
         Box::new(contract)
     }
 
-    const USER: &str = "USER";
     const ADMIN: &str = "ADMIN";
+
+    const CREATOR: &str = "CREATOR";
+
+    const SHOPPER: &str = "SHOPPER";
+
     const NATIVE_DENOM: &str = "uxion";
 
     fn mock_app() -> App {
@@ -71,10 +76,10 @@ mod tests {
                 .bank
                 .init_balance(
                     storage,
-                    &Addr::unchecked(USER),
+                    &Addr::unchecked(SHOPPER),
                     vec![Coin {
                         denom: NATIVE_DENOM.to_string(),
-                        amount: Uint128::new(1),
+                        amount: Uint128::new(100000000),
                     }],
                 )
                 .unwrap();
@@ -105,13 +110,43 @@ mod tests {
         (app, mintyplex_contract)
     }
 
+    fn app_with_collection() -> (App, MintyplexContract) {
+        let (mut app, mintyplex_contract) = proper_instantiate();
+
+        let cw721_code_id = app.store_code(cw721_contract());
+
+        let _cw_contract_addr = app
+            .instantiate_contract(
+                cw721_code_id,
+                Addr::unchecked(ADMIN),
+                &Cw721MockInstantiateMsg {},
+                &[],
+                "test",
+                None,
+            )
+            .unwrap();
+
+        let collection_params = CollectionParams {
+            code_id: cw721_code_id,
+            name: "product".to_string(),
+            symbol: "PROD".to_string(),
+        };
+
+        let msg = ExecuteMsg::CreateCollection(collection_params);
+        let cosmos_msg = mintyplex_contract.call(msg).unwrap();
+        app.execute(Addr::unchecked(CREATOR), cosmos_msg).unwrap();
+
+        (app, mintyplex_contract)
+    }
+
     mod collection {
         use super::*;
         use crate::msg::{ExecuteMsg, QueryMsg};
         use crate::state::{CollectionParams, MintParams};
+        use cosmwasm_std::coin;
 
         #[test]
-        fn create_collection() {
+        fn test_create_collection() {
             let (mut app, mintyplex_contract) = proper_instantiate();
 
             let cw721_code_id = app.store_code(cw721_contract());
@@ -135,35 +170,74 @@ mod tests {
 
             let msg = ExecuteMsg::CreateCollection(collection_params);
             let cosmos_msg = mintyplex_contract.call(msg).unwrap();
-            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap();
+            app.execute(Addr::unchecked(CREATOR), cosmos_msg).unwrap();
 
             // Query created collection
             let query_msg = QueryMsg::CreatorCollections {
-                creator: Addr::unchecked(USER),
+                creator: Addr::unchecked(CREATOR),
             };
             let creator_collections: Vec<Addr> = app
                 .wrap()
                 .query_wasm_smart(mintyplex_contract.addr(), &query_msg.clone())
                 .unwrap();
             assert_eq!(creator_collections.len(), 1);
+        }
+
+        #[test]
+        fn test_mint_nft() {
+            let (mut app, mintyplex_contract_with_collection) = app_with_collection();
+
+            let cw721_code_id = app.store_code(cw721_contract());
+
+            // Query created collection
+            let query_msg = QueryMsg::CreatorCollections {
+                creator: Addr::unchecked(CREATOR),
+            };
+            let creator_collections: Vec<Addr> = app
+                .wrap()
+                .query_wasm_smart(
+                    mintyplex_contract_with_collection.addr(),
+                    &query_msg.clone(),
+                )
+                .unwrap();
+            assert_eq!(creator_collections.len(), 1);
 
             let mint_params = MintParams {
                 collection_address: creator_collections[0].clone(),
                 code_id: cw721_code_id,
-                owner: USER.to_string(),
+                owner: SHOPPER.to_string(),
                 token_uri: "0".to_string(),
             };
             let msg = ExecuteMsg::MintNFT(mint_params);
-            let cosmos_msg = mintyplex_contract.call(msg).unwrap();
-            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap();
+
+            // test if shopper passes the wrong amount
+            let cosmos_msg_with_wrong_amount = mintyplex_contract_with_collection
+                .call_with_funds(msg.clone(), vec![coin(100000, "uxion")])
+                .unwrap();
+
+            let err_res = app
+                .execute(Addr::unchecked(SHOPPER), cosmos_msg_with_wrong_amount)
+                .is_err();
+
+            assert!(err_res);
+
+            // test when shopper passes the right amount but wrong denom
+            let cosmos_msg_with_wrong_denom = mintyplex_contract_with_collection
+                .call_with_funds(msg.clone(), vec![coin(1000000, "wrong_denom")])
+                .unwrap();
+
+            let err_res = app
+                .execute(Addr::unchecked(SHOPPER), cosmos_msg_with_wrong_denom)
+                .is_err();
+
+            assert!(err_res);
+
+            // when shopper passes the right amount
+            let cosmos_msg = mintyplex_contract_with_collection
+                .call_with_funds(msg, vec![coin(1000000, "uxion")])
+                .unwrap();
+            let res = app.execute(Addr::unchecked(SHOPPER), cosmos_msg).is_ok();
+            assert!(res);
         }
     }
 }
-
-// if info
-// .funds
-// .iter()
-// .any(|coin| coin.denom == "uxion" && coin.amount.u128() == MINT_FEE)
-// {
-// return Err(ContractError::IncorrectFunds {});
-// }
