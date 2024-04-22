@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{to_json_binary, Addr, CosmosMsg, StdResult, WasmMsg};
+use cosmwasm_std::{to_json_binary, Addr, Coin, CosmosMsg, StdResult, WasmMsg};
 
 use crate::msg::ExecuteMsg;
 
@@ -21,6 +21,20 @@ impl MintyplexContract {
             contract_addr: self.addr().into(),
             msg,
             funds: vec![],
+        }
+        .into())
+    }
+
+    pub fn call_with_funds<T: Into<ExecuteMsg>>(
+        &self,
+        msg: T,
+        funds: Vec<Coin>,
+    ) -> StdResult<CosmosMsg> {
+        let msg = to_json_binary(&msg.into())?;
+        Ok(WasmMsg::Execute {
+            contract_addr: self.addr().into(),
+            msg,
+            funds,
         }
         .into())
     }
