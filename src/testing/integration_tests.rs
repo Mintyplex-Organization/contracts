@@ -2,9 +2,11 @@
 mod tests {
     use crate::testing::helpers::MintyplexContract;
 
-    use crate::msg::{ExecuteMsg, InstantiateMsg};
-    use crate::state::CollectionParams;
-    use cosmwasm_std::{to_json_binary, Addr, Binary, Coin, Empty, Response, StdResult, Uint128};
+    use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+    use crate::state::{CollectionInfo, CollectionParams, MintParams};
+    use cosmwasm_std::{
+        coin, to_json_binary, Addr, Binary, Coin, Empty, Response, StdResult, Uint128,
+    };
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
     use serde::{Deserialize, Serialize};
 
@@ -70,6 +72,8 @@ mod tests {
 
     const NATIVE_DENOM: &str = "uxion";
 
+    const MOCK_MINT_FEE: u128 = 1000000;
+
     fn mock_app() -> App {
         AppBuilder::new().build(|router, _, storage| {
             router
@@ -130,6 +134,7 @@ mod tests {
             code_id: cw721_code_id,
             name: "product".to_string(),
             symbol: "PROD".to_string(),
+            mint_fee: MOCK_MINT_FEE,
         };
 
         let msg = ExecuteMsg::CreateCollection(collection_params);
@@ -139,10 +144,50 @@ mod tests {
         (app, mintyplex_contract)
     }
 
+    fn app_with_mint() -> (App, MintyplexContract) {
+        let (mut app, mintyplex_contract_with_collection) = app_with_collection();
+
+        let cw721_code_id = app.store_code(cw721_contract());
+
+        // Query created collection
+        let query_msg = QueryMsg::CreatorCollections {
+            creator: Addr::unchecked(CREATOR),
+            collection_name: "product".to_string(),
+        };
+        let collection_info: CollectionInfo = app
+            .wrap()
+            .query_wasm_smart(
+                mintyplex_contract_with_collection.addr(),
+                &query_msg.clone(),
+            )
+            .unwrap();
+
+        let mint_params = MintParams {
+            collection_creator: Addr::unchecked(CREATOR),
+            collection_name: "product".to_string(),
+            collection_address: collection_info.collection_address.unwrap(),
+            code_id: cw721_code_id,
+            owner: SHOPPER.to_string(),
+            token_uri: "0".to_string(),
+        };
+
+        let msg = ExecuteMsg::MintNFT(mint_params);
+
+        let cosmos_msg = mintyplex_contract_with_collection
+            .call_with_funds(msg, vec![coin(1000000, "uxion")])
+            .unwrap();
+
+        app.execute(Addr::unchecked(SHOPPER), cosmos_msg).unwrap();
+
+        (app, mintyplex_contract_with_collection)
+    }
+
     mod collection {
         use super::*;
         use crate::msg::{ExecuteMsg, QueryMsg};
-        use crate::state::{CollectionParams, MintParams};
+        use crate::state::{
+            CollectionInfo, CollectionParams, MintParams, UpdateMintFeeParams, WithdrawParams,
+        };
         use cosmwasm_std::coin;
 
         #[test]
@@ -166,6 +211,7 @@ mod tests {
                 code_id: cw721_code_id,
                 name: "product".to_string(),
                 symbol: "PROD".to_string(),
+                mint_fee: MOCK_MINT_FEE,
             };
 
             let msg = ExecuteMsg::CreateCollection(collection_params);
@@ -175,12 +221,12 @@ mod tests {
             // Query created collection
             let query_msg = QueryMsg::CreatorCollections {
                 creator: Addr::unchecked(CREATOR),
+                collection_name: "product".to_string(),
             };
-            let creator_collections: Vec<Addr> = app
+            let collection_info: StdResult<CollectionInfo> = app
                 .wrap()
-                .query_wasm_smart(mintyplex_contract.addr(), &query_msg.clone())
-                .unwrap();
-            assert_eq!(creator_collections.len(), 1);
+                .query_wasm_smart(mintyplex_contract.addr(), &query_msg.clone());
+            assert!(collection_info.is_ok());
         }
 
         #[test]
@@ -192,18 +238,20 @@ mod tests {
             // Query created collection
             let query_msg = QueryMsg::CreatorCollections {
                 creator: Addr::unchecked(CREATOR),
+                collection_name: "product".to_string(),
             };
-            let creator_collections: Vec<Addr> = app
+            let collection_info: CollectionInfo = app
                 .wrap()
                 .query_wasm_smart(
                     mintyplex_contract_with_collection.addr(),
                     &query_msg.clone(),
                 )
                 .unwrap();
-            assert_eq!(creator_collections.len(), 1);
 
             let mint_params = MintParams {
-                collection_address: creator_collections[0].clone(),
+                collection_creator: Addr::unchecked(CREATOR),
+                collection_name: "product".to_string(),
+                collection_address: collection_info.collection_address.unwrap(),
                 code_id: cw721_code_id,
                 owner: SHOPPER.to_string(),
                 token_uri: "0".to_string(),
@@ -239,5 +287,73 @@ mod tests {
             let res = app.execute(Addr::unchecked(SHOPPER), cosmos_msg).is_ok();
             assert!(res);
         }
+
+        #[test]
+        fn test_update_mint_fee() {
+            let (mut app, mintyplex_contract_with_collection) = app_with_collection();
+
+            // Query created collection
+            let query_msg = QueryMsg::CreatorCollections {
+                creator: Addr::unchecked(CREATOR),
+                collection_name: "product".to_string(),
+            };
+            let collection_info: CollectionInfo = app
+                .wrap()
+                .query_wasm_smart(
+                    mintyplex_contract_with_collection.addr(),
+                    &query_msg.clone(),
+                )
+                .unwrap();
+
+            assert_eq!(collection_info.mint_fee, MOCK_MINT_FEE);
+
+            let new_mint_fee: u128 = 10;
+
+            let update_mint_fee_params = UpdateMintFeeParams {
+                collection_name: "product".to_string(),
+                mint_fee: new_mint_fee,
+            };
+
+            let msg = ExecuteMsg::UpdateMintFee(update_mint_fee_params);
+
+            let cosmos_msg = mintyplex_contract_with_collection.call(msg).unwrap();
+            let res = app.execute(Addr::unchecked(CREATOR), cosmos_msg).unwrap();
+
+            // Query created collection
+            let query_msg = QueryMsg::CreatorCollections {
+                creator: Addr::unchecked(CREATOR),
+                collection_name: "product".to_string(),
+            };
+            let collection_info: CollectionInfo = app
+                .wrap()
+                .query_wasm_smart(
+                    mintyplex_contract_with_collection.addr(),
+                    &query_msg.clone(),
+                )
+                .unwrap();
+
+            assert_eq!(collection_info.mint_fee, new_mint_fee);
+        }
+
+        // testing this has been difficult because this is private:https://docs.rs/cw-multi-test/0.20.0/src/cw_multi_test/bank.rs.html#64 :/
+        // #[test]
+        // fn test_withdraw() {
+        //     let (mut app, mintyplex_contract_with_mint) = app_with_mint();
+        //
+        //     let storage = app.storage();
+        //
+        //     let withdraw_params = WithdrawParams {
+        //         withdraw_amount: 20000,
+        //         withdraw_address: Addr::unchecked(ADMIN),
+        //     };
+        //
+        //     let msg = ExecuteMsg::Withdraw(withdraw_params);
+        //
+        //     let cosmos_msg = mintyplex_contract_with_mint.call(msg).unwrap();
+        //     let res = app.execute(Addr::unchecked(ADMIN), cosmos_msg);
+        //     // assert!(res);
+        //     dbg!(res);
+        //     assert!(false);
+        // }
     }
 }
