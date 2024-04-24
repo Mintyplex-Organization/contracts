@@ -6,6 +6,16 @@ use serde::{Deserialize, Serialize};
 #[cw_serde]
 pub struct Config {
     pub owner: Addr,
+    pub mint_percent: u128,
+}
+
+#[cw_serde]
+#[derive(Default)]
+pub struct CollectionInfo {
+    pub name: String,
+    pub symbol: String,
+    pub mint_fee: u128,
+    pub collection_address: Option<Addr>,
 }
 
 #[cw_serde]
@@ -14,19 +24,39 @@ pub struct CollectionParams {
     pub code_id: u64,
     pub name: String,
     pub symbol: String,
+    pub mint_fee: u128,
 }
+
 #[cw_serde]
 pub struct MintParams {
+    pub collection_creator: Addr,
+    pub collection_name: String,
     pub collection_address: Addr,
     pub code_id: u64,
     pub owner: String,
     pub token_uri: String,
 }
-pub const CREATOR_COLLECTIONS: Map<&Addr, Vec<Addr>> = Map::new("creator_collections");
+
+#[cw_serde]
+pub struct UpdateMintFeeParams {
+    pub collection_name: String,
+    pub mint_fee: u128,
+}
+
+#[cw_serde]
+pub struct WithdrawParams {
+    pub withdraw_amount: u128,
+    pub withdraw_address: Addr,
+}
+
+pub type CreatorAddress = Addr;
+pub const CREATOR_COLLECTIONS: Map<(&CreatorAddress, &str), CollectionInfo> =
+    Map::new("creator_collections");
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PendingInstantiation {
     pub creator: Addr,
+    pub collection_name: String,
 }
 pub const PENDING_INSTANTIATIONS: Map<u64, PendingInstantiation> =
     Map::new("pending_instantiations");
