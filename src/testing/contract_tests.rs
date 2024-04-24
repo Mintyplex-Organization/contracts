@@ -4,12 +4,14 @@
 // use cosmwasm_std::{
 //     from_json, to_json_binary, Addr, Coin, CosmosMsg, DepsMut, Empty, Response, StdError, WasmMsg,
 // };
+const MOCK_MINT_FEE: u128 = 1000000;
 
 // #[cfg(test)]
 mod tests {
     use crate::contract::{execute_create_collection, instantiate};
     use crate::msg;
     use crate::state::{CollectionParams, Config, CONFIG};
+    use crate::testing::contract_tests::MOCK_MINT_FEE;
     use crate::ContractError;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::Addr;
@@ -30,7 +32,8 @@ mod tests {
         assert_eq!(
             state,
             Config {
-                owner: Addr::unchecked("creator".to_string())
+                owner: Addr::unchecked("creator".to_string()),
+                mint_percent: 2
             }
         )
     }
@@ -48,12 +51,14 @@ mod tests {
             code_id: cw721_non_transferable_code_id,
             name: "book".to_string(),
             symbol: "book".to_string(),
+            mint_fee: MOCK_MINT_FEE,
         };
 
         let invalid_params: CollectionParams = CollectionParams {
             code_id: cw721_non_transferable_code_id,
             name: "".to_string(),
             symbol: "".to_string(),
+            mint_fee: MOCK_MINT_FEE,
         };
 
         let err =
