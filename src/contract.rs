@@ -38,13 +38,14 @@ pub fn instantiate(
 
     let config = Config {
         owner: owner.clone(),
-        mint_percent: 2,
+        mint_percent: msg.mint_percent,
     };
     CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
-        .add_attribute("owner", owner))
+        .add_attribute("owner", owner)
+        .add_attribute("mint percent", msg.mint_percent.to_string()))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

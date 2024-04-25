@@ -7,6 +7,7 @@ use state::{CollectionParams, MintParams};
 #[cw_serde]
 pub struct InstantiateMsg {
     pub owner: Option<String>,
+    pub mint_percent: u128,
 }
 
 #[cw_serde]
