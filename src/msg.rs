@@ -1,5 +1,5 @@
 use crate::state;
-use crate::state::{UpdateMintFeeParams, WithdrawParams};
+use crate::state::{Config, UpdateMintFeeParams, WithdrawParams};
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::Addr;
 use state::{CollectionParams, MintParams};
@@ -14,8 +14,9 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     CreateCollection(CollectionParams),
     MintNFT(MintParams),
-    UpdateMintFee(UpdateMintFeeParams),
     Withdraw(WithdrawParams),
+    UpdateConfig(Config),
+    UpdateMintFee(UpdateMintFeeParams),
 }
 
 #[cw_serde]

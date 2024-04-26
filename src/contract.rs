@@ -58,8 +58,9 @@ pub fn execute(
     match msg {
         ExecuteMsg::CreateCollection(params) => execute_create_collection(deps, env, info, params),
         ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params),
-        ExecuteMsg::UpdateMintFee(params) => execute_update_mint_fee(deps, env, info, params),
         ExecuteMsg::Withdraw(params) => execute_withdraw(deps, env, info, params),
+        ExecuteMsg::UpdateConfig(config) => execute_update_config(deps, env, info, config),
+        ExecuteMsg::UpdateMintFee(params) => execute_update_mint_fee(deps, env, info, params),
     }
 }
 
@@ -118,7 +119,7 @@ pub fn execute_create_collection(
 
 pub fn execute_mint_nft(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     params: MintParams,
 ) -> Result<Response, ContractError> {
@@ -156,7 +157,7 @@ pub fn execute_mint_nft(
     let creator_amount = mint_fee - mintyplex_amount;
 
     let mintyplex_bank_msg = BankMsg::Send {
-        to_address: params.collection_creator.to_string(),
+        to_address: env.contract.address.to_string(),
         amount: vec![Coin {
             denom: "uxion".to_string(),
             amount: Uint128::from(mintyplex_amount),
@@ -176,26 +177,6 @@ pub fn execute_mint_nft(
         .add_message(mintyplex_bank_msg)
         .add_message(creator_bank_msg)
         .add_attribute("action", "mint nft"))
-}
-
-pub fn execute_update_mint_fee(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    params: UpdateMintFeeParams,
-) -> Result<Response, ContractError> {
-    let mut collection_info =
-        CREATOR_COLLECTIONS.load(deps.storage, (&info.sender, &params.collection_name))?;
-
-    collection_info.mint_fee = params.mint_fee;
-
-    CREATOR_COLLECTIONS.save(
-        deps.storage,
-        (&info.sender, &params.collection_name),
-        &collection_info,
-    )?;
-
-    Ok(Response::new().add_attribute("action", "update mint fee"))
 }
 
 pub fn execute_withdraw(
@@ -221,6 +202,43 @@ pub fn execute_withdraw(
     Ok(Response::new()
         .add_message(bank_msg)
         .add_attribute("action", "withdraw"))
+}
+
+pub fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    new_config: Config,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    CONFIG.save(deps.storage, &new_config)?;
+
+    Ok(Response::new().add_attribute("action", "update config"))
+}
+
+pub fn execute_update_mint_fee(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    params: UpdateMintFeeParams,
+) -> Result<Response, ContractError> {
+    let mut collection_info =
+        CREATOR_COLLECTIONS.load(deps.storage, (&info.sender, &params.collection_name))?;
+
+    collection_info.mint_fee = params.mint_fee;
+
+    CREATOR_COLLECTIONS.save(
+        deps.storage,
+        (&info.sender, &params.collection_name),
+        &collection_info,
+    )?;
+
+    Ok(Response::new().add_attribute("action", "update mint fee"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
