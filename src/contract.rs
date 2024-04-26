@@ -1,3 +1,10 @@
+use crate::error::ContractError;
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{
+    increment_reply_id, increment_token_index, CollectionInfo, CollectionParams, Config,
+    MintParams, PendingInstantiation, UpdateMintFeeParams, WithdrawParams, CONFIG,
+    CREATOR_COLLECTIONS, CW721_REPLY_ID, PENDING_INSTANTIATIONS, TOKEN_INDEX,
+};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -10,14 +17,6 @@ use cw721_non_transferable::{
     ExecuteMsg as Cw721ExecuteMsg, InstantiateMsg as cw721NonTransferableInstantiateMsg,
 };
 use cw_utils::parse_reply_instantiate_data;
-
-use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{
-    increment_reply_id, increment_token_index, CollectionParams, Config, MintParams,
-    PendingInstantiation, CONFIG, CREATOR_COLLECTIONS, CW721_REPLY_ID, PENDING_INSTANTIATIONS,
-    TOKEN_INDEX,
-};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:mintyplex";
@@ -39,12 +38,14 @@ pub fn instantiate(
 
     let config = Config {
         owner: owner.clone(),
+        mint_percent: msg.mint_percent,
     };
     CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
-        .add_attribute("owner", owner))
+        .add_attribute("owner", owner)
+        .add_attribute("mint percent", msg.mint_percent.to_string()))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -57,10 +58,11 @@ pub fn execute(
     match msg {
         ExecuteMsg::CreateCollection(params) => execute_create_collection(deps, env, info, params),
         ExecuteMsg::MintNFT(params) => execute_mint_nft(deps, env, info, params),
+        ExecuteMsg::Withdraw(params) => execute_withdraw(deps, env, info, params),
+        ExecuteMsg::UpdateConfig(config) => execute_update_config(deps, env, info, config),
+        ExecuteMsg::UpdateMintFee(params) => execute_update_mint_fee(deps, env, info, params),
     }
 }
-
-const MINT_FEE: u128 = 1000000; // Define the mint fee
 
 pub fn execute_create_collection(
     deps: DepsMut,
@@ -76,9 +78,23 @@ pub fn execute_create_collection(
 
     let pending = PendingInstantiation {
         creator: info.sender.clone(),
+        collection_name: params.name.clone(),
     };
 
     PENDING_INSTANTIATIONS.save(deps.storage, reply_id, &pending)?;
+
+    let collection_info = CollectionInfo {
+        name: params.name.clone(),
+        symbol: params.symbol.clone(),
+        mint_fee: params.mint_fee,
+        collection_address: None,
+    };
+
+    CREATOR_COLLECTIONS.save(
+        deps.storage,
+        (&info.sender, &params.name.clone()),
+        &collection_info,
+    )?;
 
     let wasm_msg = WasmMsg::Instantiate {
         admin: None,
@@ -107,10 +123,17 @@ pub fn execute_mint_nft(
     info: MessageInfo,
     params: MintParams,
 ) -> Result<Response, ContractError> {
+    let mint_fee = CREATOR_COLLECTIONS
+        .load(
+            deps.storage,
+            (&params.collection_creator, &params.collection_name),
+        )?
+        .mint_fee;
+
     if info
         .funds
         .iter()
-        .any(|coin| coin.denom != "uxion" && coin.amount.u128() != MINT_FEE)
+        .any(|coin| coin.denom != "uxion" && coin.amount.u128() != mint_fee)
     {
         return Err(ContractError::IncorrectFunds {});
     }
@@ -128,18 +151,94 @@ pub fn execute_mint_nft(
         funds: vec![],
     });
 
-    let bank_msg = BankMsg::Send {
+    let mint_percent = CONFIG.load(deps.storage)?.mint_percent;
+
+    let mintyplex_amount = (mint_fee * mint_percent) / 100;
+    let creator_amount = mint_fee - mintyplex_amount;
+
+    let mintyplex_bank_msg = BankMsg::Send {
         to_address: env.contract.address.to_string(),
         amount: vec![Coin {
             denom: "uxion".to_string(),
-            amount: Uint128::from(MINT_FEE),
+            amount: Uint128::from(mintyplex_amount),
+        }],
+    };
+
+    let creator_bank_msg = BankMsg::Send {
+        to_address: params.collection_creator.to_string(),
+        amount: vec![Coin {
+            denom: "uxion".to_string(),
+            amount: Uint128::from(creator_amount),
         }],
     };
 
     Ok(Response::new()
         .add_message(msg)
+        .add_message(mintyplex_bank_msg)
+        .add_message(creator_bank_msg)
+        .add_attribute("action", "mint nft"))
+}
+
+pub fn execute_withdraw(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    params: WithdrawParams,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let bank_msg = BankMsg::Send {
+        to_address: params.withdraw_address.to_string(),
+        amount: vec![Coin {
+            denom: "uxion".to_string(),
+            amount: Uint128::from(params.withdraw_amount),
+        }],
+    };
+
+    Ok(Response::new()
         .add_message(bank_msg)
-        .add_attribute("action", "mint-nft"))
+        .add_attribute("action", "withdraw"))
+}
+
+pub fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    new_config: Config,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    CONFIG.save(deps.storage, &new_config)?;
+
+    Ok(Response::new().add_attribute("action", "update config"))
+}
+
+pub fn execute_update_mint_fee(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    params: UpdateMintFeeParams,
+) -> Result<Response, ContractError> {
+    let mut collection_info =
+        CREATOR_COLLECTIONS.load(deps.storage, (&info.sender, &params.collection_name))?;
+
+    collection_info.mint_fee = params.mint_fee;
+
+    CREATOR_COLLECTIONS.save(
+        deps.storage,
+        (&info.sender, &params.collection_name),
+        &collection_info,
+    )?;
+
+    Ok(Response::new().add_attribute("action", "update mint fee"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -147,9 +246,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
         QueryMsg::TokenIndex {} => to_json_binary(&query_token_index(deps)?),
-        QueryMsg::CreatorCollections { creator } => {
-            to_json_binary(&query_creator_collections(deps, creator)?)
-        }
+        QueryMsg::CreatorCollections {
+            creator,
+            collection_name,
+        } => to_json_binary(&query_creator_collections(deps, creator, collection_name)?),
     }
 }
 
@@ -163,11 +263,15 @@ fn query_token_index(deps: Deps) -> StdResult<u64> {
     Ok(index)
 }
 
-fn query_creator_collections(deps: Deps, creator: Addr) -> StdResult<Vec<Addr>> {
-    let collections = CREATOR_COLLECTIONS
-        .may_load(deps.storage, &creator)?
+fn query_creator_collections(
+    deps: Deps,
+    creator: Addr,
+    collection_name: String,
+) -> StdResult<CollectionInfo> {
+    let collection_info = CREATOR_COLLECTIONS
+        .may_load(deps.storage, (&creator, &collection_name))?
         .unwrap_or_default();
-    Ok(collections)
+    Ok(collection_info)
 }
 
 // Reply callback triggered from cw721 contract instantiation in instantiate()
@@ -180,19 +284,23 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
     let pending = PENDING_INSTANTIATIONS
         .may_load(deps.storage, msg.id)?
         .ok_or(ContractError::InvalidReplyID {})?;
-    let creator = pending.creator;
 
     match parse_reply_instantiate_data(msg.clone()) {
         Ok(res) => {
             let collection_address = res.contract_address;
 
             let mut collections = CREATOR_COLLECTIONS
-                .may_load(deps.storage, &creator)?
-                .unwrap_or_else(Vec::new);
+                .may_load(deps.storage, (&pending.creator, &pending.collection_name))?
+                .unwrap();
 
-            collections.push(deps.api.addr_validate(&collection_address).unwrap());
+            collections.collection_address =
+                Some(deps.api.addr_validate(&collection_address).unwrap());
 
-            CREATOR_COLLECTIONS.save(deps.storage, &creator, &collections)?;
+            CREATOR_COLLECTIONS.save(
+                deps.storage,
+                (&pending.creator, &pending.collection_name),
+                &collections,
+            )?;
 
             PENDING_INSTANTIATIONS.remove(deps.storage, msg.id);
 
